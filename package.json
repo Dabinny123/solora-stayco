@@ -1,0 +1,38 @@
+{
+  "name": "solora-stayco",
+  "version": "1.0.0",
+  "description": "A curated hotel booking and hosting platform with aesthetic, minimalist design",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "firebase deploy"
+  },
+  "keywords": [
+    "hotel",
+    "booking",
+    "firebase",
+    "platform"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "firebase": "^12.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.0",
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "baseline-browser-mapping": "^2.9.19",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "tailwindcss-animate": "^1.0.7",
+    "vite": "^7.2.2"
+  }
+}

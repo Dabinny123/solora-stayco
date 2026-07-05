@@ -1,0 +1,19 @@
+{
+  "name": "solora-stayco-payouts-server",
+  "version": "1.0.0",
+  "description": "Standalone Node.js server for PayPal Payouts API",
+  "main": "paypal-payouts-server.js",
+  "scripts": {
+    "start": "node paypal-payouts-server.js",
+    "dev": "nodemon paypal-payouts-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
+

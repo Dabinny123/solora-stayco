@@ -1,0 +1,175 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to get user role from Firestore
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    // Users collection
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      // Allow users to update their own document
+      // OR allow authenticated users to credit wallet balances (for booking earnings)
+      // OR allow admin to update any user
+      allow update: if request.auth != null && (
+        request.auth.uid == userId ||
+        getUserRole() == 'admin' ||
+        // Allow wallet balance credits (when balance increases)
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walletBalance', 'updatedAt']) &&
+         request.resource.data.walletBalance > resource.data.walletBalance)
+      );
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Listings collection
+    match /listings/{listingId} {
+      allow read: if true; // Public read access
+      allow create: if request.auth != null && 
+        (getUserRole() == 'host' || getUserRole() == 'admin');
+      // Allow view increment by anyone (for analytics)
+      // Allow host to update their own listings
+      // Allow admin to update any listing
+      allow update: if request.auth != null && (
+        (getUserRole() == 'host' && resource.data.hostId == request.auth.uid) ||
+        getUserRole() == 'admin' ||
+        // Allow anyone to increment views (for analytics)
+        (request.resource.data.keys().hasOnly(['views']) && 
+         request.resource.data.views == resource.data.views + 1)
+      );
+      allow delete: if request.auth != null && 
+        ((getUserRole() == 'host' && resource.data.hostId == request.auth.uid) ||
+         getUserRole() == 'admin');
+    }
+    
+    // Bookings collection
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null && 
+        (resource.data.guestId == request.auth.uid || 
+         resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null && 
+        (getUserRole() == 'guest' || getUserRole() == 'host' || getUserRole() == 'admin');
+      allow update: if request.auth != null && 
+        (resource.data.guestId == request.auth.uid ||
+         resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+    }
+    
+    // Reviews collection
+    match /reviews/{reviewId} {
+      allow read: if true; // Public read access
+      allow create: if request.auth != null && 
+        (getUserRole() == 'guest' || getUserRole() == 'host' || getUserRole() == 'admin');
+      allow update, delete: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         getUserRole() == 'admin');
+    }
+    
+    // Messages collection
+    match /messages/{messageId} {
+      allow read: if request.auth != null && 
+        (resource.data.senderId == request.auth.uid ||
+         resource.data.receiverId == request.auth.uid);
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && 
+        (resource.data.senderId == request.auth.uid ||
+         getUserRole() == 'admin');
+    }
+    
+    // Payments collection
+    match /payments/{paymentId} {
+      allow read: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      // Allow user to update their own payment, host to update payments for their listings, or admin
+      allow update: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.hostId == request.auth.uid ||
+        getUserRole() == 'admin'
+      );
+    }
+    
+    // Wallet transactions collection
+    match /wallet_transactions/{transactionId} {
+      allow read: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Settings collection
+    match /settings/{settingId} {
+      allow read: if true; // Public read access for platform settings
+      allow create, update: if request.auth != null && getUserRole() == 'admin';
+      allow delete: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Moods collection
+    match /moods/{moodId} {
+      allow read: if true; // Public read access
+      allow create, update, delete: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Admin controls collection
+    match /adminControls/{controlId} {
+      allow read: if request.auth != null && getUserRole() == 'admin';
+      allow create, update, delete: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow delete: if request.auth != null && 
+        (resource.data.userId == request.auth.uid ||
+         getUserRole() == 'admin');
+    }
+    
+    // Payouts collection
+    match /payouts/{payoutId} {
+      allow read: if request.auth != null && 
+        (resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && 
+        (resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+    }
+    
+    // Payout requests collection
+    match /payout_requests/{requestId} {
+      allow read: if request.auth != null && 
+        (resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Withdrawal requests collection
+    match /withdrawal_requests/{requestId} {
+      allow read: if request.auth != null && 
+        (resource.data.hostId == request.auth.uid ||
+         getUserRole() == 'admin');
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+    // Wallet errors collection (for tracking failed wallet operations)
+    match /wallet_errors/{errorId} {
+      allow read: if request.auth != null && getUserRole() == 'admin';
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && getUserRole() == 'admin';
+    }
+    
+  }
+}
+
