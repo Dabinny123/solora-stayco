@@ -1,20 +1,92 @@
-// Listing Card - Explore page design with Featured tag, mood pill, heart
+// Listing Card - Explore page design with safer public-facing fallbacks
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getMoodStyle } from '../utils/moodStyles';
 
+const FALLBACK_STAYS = {
+  relaxed: {
+    title: 'Calm Coastal Hideaway',
+    description: 'A soft, sunlit stay made for slow mornings, quiet corners, and easy recharging.',
+    image: '/mood-relaxed.jpg',
+  },
+  romantic: {
+    title: 'Sunset Suite for Two',
+    description: 'An intimate escape with warm views, cozy textures, and space to reconnect.',
+    image: '/mood-romantic.jpg',
+  },
+  adventurous: {
+    title: 'Island Adventure Villa',
+    description: 'A scenic base for thrill seekers, explorers, and spontaneous weekend plans.',
+    image: '/mood-adventurous.jpg',
+  },
+  creative: {
+    title: 'Creative Seaside Studio',
+    description: 'A bright retreat for journaling, planning, making, and finding fresh ideas.',
+    image: '/mood-creative.jpg',
+  },
+  family: {
+    title: 'Family Poolside Stay',
+    description: 'A welcoming stay with room for shared meals, laughter, and easy family time.',
+    image: '/mood-family.jpg',
+  },
+  needPeace: {
+    title: 'Quiet Garden Retreat',
+    description: 'A peaceful hideaway for guests who want silence, softness, and breathing room.',
+    image: '/mood-peace.jpg',
+  },
+  selfCare: {
+    title: 'Self-Care Wellness Nook',
+    description: 'A restorative stay for restful nights, gentle routines, and unhurried comfort.',
+    image: '/mood-selfcare.jpg',
+  },
+  soloRecharge: {
+    title: 'Solo Recharge Cabin',
+    description: 'A private escape designed for reflection, reset days, and independent travel.',
+    image: '/mood-solo.jpg',
+  },
+  default: {
+    title: 'Curated Mood Stay',
+    description: 'A thoughtfully prepared staycation matched to the feeling you want from your trip.',
+    image: '/hero-staycation.jpg',
+  },
+};
+
+function looksLikeTestText(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text || text.length < 4) return true;
+  if (/(asdf|asdasd|aaaa|test|sample|lorem|dummy)/i.test(text)) return true;
+
+  const letters = text.replace(/[^a-z]/g, '');
+  return letters.length >= 8 && new Set(letters).size <= 4;
+}
+
 function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
   const [localFavorite, setLocalFavorite] = useState(isFavorite);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  if (!listing || !listing.id) return null;
 
   const primaryMoodId = listing.moodTags?.[0];
   const primaryMood = moods.find((m) => (m.id || m.docId) === primaryMoodId);
   const primaryMoodName = primaryMood?.name || primaryMoodId;
   const moodStyle = primaryMoodId ? getMoodStyle(primaryMoodId) : null;
+  const fallback = FALLBACK_STAYS[primaryMoodId] || FALLBACK_STAYS.default;
+  const titleLooksTemporary = looksLikeTestText(listing.title);
+  const descriptionLooksTemporary = looksLikeTestText(listing.description);
+  const displayTitle = titleLooksTemporary ? fallback.title : listing.title;
+  const displayDescription = descriptionLooksTemporary ? fallback.description : listing.description;
+  const displayCity = listing.location?.city || 'Mood-matched destination';
+  const displayRegion = listing.location?.state || listing.location?.country || 'Solora StayCo';
+  const displayGuests = Number(listing.maxGuests) > 0 ? Number(listing.maxGuests) : 2;
+  const displayBeds = Number(listing.bedrooms ?? listing.beds) > 0 ? Number(listing.bedrooms ?? listing.beds) : 1;
+  const displayPrice = Number(listing.basePrice) > 0 ? Number(listing.basePrice) : 3500;
+  const rawImage = listing.featuredPhoto || listing.photos?.[0];
+  const imgSrc = imageFailed || titleLooksTemporary ? fallback.image : rawImage || fallback.image;
 
   const formatPrice = (price) => {
     const curr = listing?.currency || 'PHP';
-    if (curr === 'PHP' || curr === '₱') {
-      return `₱${Number(price).toLocaleString()}`;
+    if (curr === 'PHP' || curr === '\u20b1') {
+      return `\u20b1${Number(price).toLocaleString()}`;
     }
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -36,41 +108,23 @@ function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
   const isFav = onFavoriteClick ? isFavorite : localFavorite;
   const showFeatured = listing.rating >= 4 || listing.totalReviews >= 10;
 
-  const imgSrc = listing.featuredPhoto || listing.photos?.[0];
-
-  if (!listing || !listing.id) return null;
-
   return (
     <Link to={`/listing/${listing.id}`} className="block group">
       <div className="bg-card rounded-2xl overflow-hidden border border-border shadow-soft hover:shadow-medium transition-all duration-200 h-full">
-        {/* Image */}
         <div className="relative aspect-[4/3] overflow-hidden bg-muted">
-          {imgSrc ? (
-            <img
-              src={imgSrc}
-              alt={listing.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-              onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.parentElement.innerHTML = '<div class="w-full h-full flex items-center justify-center text-muted-foreground bg-muted"><svg class="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg></div>';
-              }}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-              <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-          )}
+          <img
+            src={imgSrc}
+            alt={displayTitle}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            onError={() => setImageFailed(true)}
+          />
 
-          {/* Featured tag */}
           {showFeatured && (
             <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium">
               Featured
             </div>
           )}
 
-          {/* Favorite heart */}
           <button
             onClick={handleFavorite}
             className="absolute top-3 right-3 p-2 rounded-full bg-white/90 backdrop-blur-sm hover:bg-white transition-colors shadow-soft"
@@ -86,7 +140,6 @@ function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
             </svg>
           </button>
 
-          {/* Mood tag */}
           {moodStyle && (
             <div
               className={`absolute bottom-3 left-3 px-3 py-1.5 rounded-full bg-gradient-to-r ${moodStyle.gradient} text-white text-xs font-medium flex items-center gap-1.5`}
@@ -97,7 +150,6 @@ function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
           )}
         </div>
 
-        {/* Content */}
         <div className="p-4">
           <div className="flex items-center gap-1 text-muted-foreground text-sm mb-1">
             <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -105,41 +157,35 @@ function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <span className="line-clamp-1">
-              {listing.location?.city}, {listing.location?.state || listing.location?.country}
+              {displayCity}, {displayRegion}
             </span>
           </div>
 
           <h3 className="font-serif text-lg font-semibold text-foreground mb-1 group-hover:text-primary transition-colors line-clamp-1">
-            {listing.title}
+            {displayTitle}
           </h3>
 
-          {listing.description && (
-            <p className="text-muted-foreground text-sm mb-3 line-clamp-2">
-              {listing.description}
-            </p>
-          )}
+          <p className="text-muted-foreground text-sm mb-3 line-clamp-2">
+            {displayDescription}
+          </p>
 
           <div className="flex items-center gap-4 text-sm text-muted-foreground mb-3">
-            {listing.maxGuests > 0 && (
-              <span className="flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                {listing.maxGuests} guests
-              </span>
-            )}
-            {(listing.bedrooms ?? listing.beds) > 0 && (
-              <span className="flex items-center gap-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                </svg>
-                {listing.bedrooms ?? listing.beds} bed
-              </span>
-            )}
+            <span className="flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              {displayGuests} guests
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+              {displayBeds} bed{displayBeds === 1 ? '' : 's'}
+            </span>
           </div>
 
           <div className="flex items-center justify-between pt-3 border-t border-border">
-            {listing.rating > 0 && (
+            {listing.rating > 0 ? (
               <span className="flex items-center gap-1 text-foreground font-medium">
                 <svg className="w-4 h-4 text-amber-500 fill-amber-500" viewBox="0 0 20 20">
                   <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
@@ -147,10 +193,12 @@ function ListingCard({ listing, moods = [], isFavorite, onFavoriteClick }) {
                 {listing.rating.toFixed(1)}
                 <span className="text-muted-foreground font-normal text-sm">({listing.totalReviews || 0})</span>
               </span>
+            ) : (
+              <span className="text-sm text-muted-foreground">New stay</span>
             )}
             <div className="text-right">
               <span className="font-serif text-lg font-semibold text-foreground">
-                {formatPrice(listing.basePrice)}
+                {formatPrice(displayPrice)}
               </span>
               <span className="text-muted-foreground text-sm ml-1">/ night</span>
             </div>

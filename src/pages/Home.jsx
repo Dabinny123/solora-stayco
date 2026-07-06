@@ -11,8 +11,11 @@ function Home() {
   const [loading, setLoading] = useState(true);
   const [destination, setDestination] = useState('');
   const [guests, setGuests] = useState('');
+  const [checkIn, setCheckIn] = useState('');
+  const [checkOut, setCheckOut] = useState('');
   const [mood, setMood] = useState('');
   const navigate = useNavigate();
+  const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     let cancelled = false;
@@ -26,7 +29,12 @@ function Home() {
   const handleSearch = (e) => {
     e.preventDefault();
     const params = new URLSearchParams();
-    if (destination) params.set('destination', destination);
+    if (destination) {
+      params.set('destination', destination);
+      params.set('search', destination);
+    }
+    if (checkIn) params.set('checkIn', checkIn);
+    if (checkOut) params.set('checkOut', checkOut);
     if (guests) params.set('guests', guests);
     if (mood) params.set('mood', mood);
     navigate(`/explore?${params.toString()}`);
@@ -130,13 +138,36 @@ function Home() {
           </div>
 
           {/* Check In – Check Out */}
-          <div className="flex items-center gap-3 px-5 py-2.5 flex-1">
+          <div className="flex items-center gap-3 px-5 py-2.5 flex-1 md:flex-[1.35]">
             <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <div className="flex-1">
               <div className="text-xs font-semibold text-foreground">Check In – Check Out</div>
-              <div className="text-xs text-gray-400 mt-0.5">Add dates</div>
+              <div className="grid grid-cols-2 gap-2 mt-0.5">
+                <input
+                  type="date"
+                  value={checkIn}
+                  onChange={(e) => {
+                    const nextCheckIn = e.target.value;
+                    setCheckIn(nextCheckIn);
+                    if (checkOut && nextCheckIn && checkOut <= nextCheckIn) {
+                      setCheckOut('');
+                    }
+                  }}
+                  min={today}
+                  aria-label="Check-in date"
+                  className="min-w-0 text-[11px] text-gray-500 bg-transparent focus:outline-none"
+                />
+                <input
+                  type="date"
+                  value={checkOut}
+                  onChange={(e) => setCheckOut(e.target.value)}
+                  min={checkIn || today}
+                  aria-label="Check-out date"
+                  className="min-w-0 text-[11px] text-gray-500 bg-transparent focus:outline-none"
+                />
+              </div>
             </div>
           </div>
 
@@ -150,6 +181,7 @@ function Home() {
               <input
                 type="number"
                 min="1"
+                max="16"
                 value={guests}
                 onChange={e => setGuests(e.target.value)}
                 placeholder="Add guests"
