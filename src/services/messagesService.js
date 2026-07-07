@@ -65,8 +65,23 @@ export async function getMessage(messageId) {
  * @returns {Promise<Array>} Array of messages
  */
 export async function getConversationMessages(conversationId, limitCount = 100) {
-    const filters = [{ field: 'conversationId', operator: '==', value: conversationId }];
-    return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'asc', limitCount);
+    try {
+        const filters = [{ field: 'conversationId', operator: '==', value: conversationId }];
+        return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'asc', limitCount);
+    } catch (error) {
+        if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+            console.warn('Conversation message index unavailable, using conversation-only fallback query');
+            const messages = await getDocuments(
+                COLLECTION_NAME,
+                [{ field: 'conversationId', operator: '==', value: conversationId }],
+                null,
+                null,
+                limitCount
+            );
+            return messages.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+        }
+        throw error;
+    }
 }
 
 /**
@@ -75,20 +90,35 @@ export async function getConversationMessages(conversationId, limitCount = 100) 
  * @returns {Promise<Array>} Array of conversation summaries
  */
 export async function getUserConversations(userId) {
+    const loadMessages = async (field) => {
+        try {
+            return await getDocuments(
+                COLLECTION_NAME,
+                [{ field, operator: '==', value: userId }],
+                'createdAt',
+                'desc'
+            );
+        } catch (error) {
+            if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+                console.warn(`${field} message index unavailable, using unordered fallback query`);
+                const messages = await getDocuments(
+                    COLLECTION_NAME,
+                    [{ field, operator: '==', value: userId }],
+                    null,
+                    null,
+                    1000
+                );
+                return messages.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            }
+            throw error;
+        }
+    };
+
     // Get all messages where user is sender or receiver
-    const sentMessages = await getDocuments(
-        COLLECTION_NAME,
-        [{ field: 'senderId', operator: '==', value: userId }],
-        'createdAt',
-        'desc'
-    );
-    
-    const receivedMessages = await getDocuments(
-        COLLECTION_NAME,
-        [{ field: 'receiverId', operator: '==', value: userId }],
-        'createdAt',
-        'desc'
-    );
+    const [sentMessages, receivedMessages] = await Promise.all([
+        loadMessages('senderId'),
+        loadMessages('receiverId'),
+    ]);
     
     // Group by conversation ID and get latest message
     const conversationsMap = new Map();
@@ -110,12 +140,24 @@ export async function getUserConversations(userId) {
  * @returns {Promise<number>} Unread message count
  */
 export async function getUnreadMessageCount(userId) {
-    const filters = [
-        { field: 'receiverId', operator: '==', value: userId },
-        { field: 'read', operator: '==', value: false }
-    ];
-    const messages = await getDocuments(COLLECTION_NAME, filters);
-    return messages.length;
+    try {
+        const filters = [
+            { field: 'receiverId', operator: '==', value: userId },
+            { field: 'read', operator: '==', value: false }
+        ];
+        const messages = await getDocuments(COLLECTION_NAME, filters);
+        return messages.length;
+    } catch (error) {
+        if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+            console.warn('Unread message index unavailable, using receiver-only fallback query');
+            const messages = await getDocuments(
+                COLLECTION_NAME,
+                [{ field: 'receiverId', operator: '==', value: userId }]
+            );
+            return messages.filter((message) => message.read === false).length;
+        }
+        throw error;
+    }
 }
 
 /**

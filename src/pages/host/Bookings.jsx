@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getBookingsByHost, confirmBooking, cancelBooking } from '../../services/bookingsService';
 import { getListing } from '../../services/listingsService';
+import { getPaymentByBooking } from '../../services/paymentsService';
 
 function HostBookings() {
   const { currentUser } = useAuth();
@@ -26,11 +27,20 @@ function HostBookings() {
         filtered = allBookings.filter(booking => booking.status === filter);
       }
       
-      // Load listing data for each booking
+      // Load related data without hiding the booking if a secondary lookup fails.
       const bookingsWithListings = await Promise.all(
         filtered.map(async (booking) => {
-          const listing = await getListing(booking.listingId);
-          return { ...booking, listing };
+          const [listing, payment] = await Promise.all([
+            getListing(booking.listingId).catch((listingError) => {
+              console.error('Error loading booking listing:', listingError);
+              return null;
+            }),
+            getPaymentByBooking(booking.id).catch((paymentError) => {
+              console.error('Error loading booking payment:', paymentError);
+              return null;
+            }),
+          ]);
+          return { ...booking, listing, payment };
         })
       );
       
@@ -75,11 +85,31 @@ function HostBookings() {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
     });
+  };
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'Not recorded';
+    return new Date(dateString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
+  const getPaymentMethod = (booking) => {
+    const method = booking.paymentMethod || booking.payment?.method;
+    if (!method) return 'Not recorded';
+    if (method === 'paypal') return 'PayPal';
+    if (method === 'e-wallet') return 'E-wallet';
+    return method.charAt(0).toUpperCase() + method.slice(1);
   };
 
   return (
@@ -138,6 +168,14 @@ function HostBookings() {
                         <span>Check-out: {formatDate(booking.checkOut)}</span>
                         <span>{booking.numberOfGuests} guests</span>
                         <span>{booking.numberOfNights} nights</span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-4 text-sm text-muted-foreground">
+                        <span>Payment: {getPaymentMethod(booking)}</span>
+                        <span>Status: {booking.paymentStatus || booking.payment?.status || 'pending'}</span>
+                        <span>Paid: {formatDateTime(booking.paidAt || booking.paymentCompletedAt || booking.payment?.paidAt)}</span>
+                        {(booking.paymentTransactionId || booking.payment?.transactionId) && (
+                          <span>Txn: {booking.paymentTransactionId || booking.payment.transactionId}</span>
+                        )}
                       </div>
                     </div>
                   </div>

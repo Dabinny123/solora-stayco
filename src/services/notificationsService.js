@@ -55,11 +55,29 @@ export async function getNotifications(
   userId,
   { includeRead = true, limit = 50 } = {}
 ) {
-  const filters = [{ field: 'userId', operator: '==', value: userId }];
-  if (!includeRead) {
-    filters.push({ field: 'isRead', operator: '==', value: false });
+  try {
+    const filters = [{ field: 'userId', operator: '==', value: userId }];
+    if (!includeRead) {
+      filters.push({ field: 'isRead', operator: '==', value: false });
+    }
+    return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'desc', limit);
+  } catch (error) {
+    if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+      console.warn('Notification index unavailable, using user-only fallback query');
+      let notifications = await getDocuments(COLLECTION_NAME, [
+        { field: 'userId', operator: '==', value: userId }
+      ], null, null, limit);
+
+      if (!includeRead) {
+        notifications = notifications.filter((notification) => notification.isRead === false);
+      }
+
+      return notifications
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, limit);
+    }
+    throw error;
   }
-  return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'desc', limit);
 }
 
 /**

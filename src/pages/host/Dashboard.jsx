@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { getListingsByHost } from '../../services/listingsService';
-import { getTodayCheckIns, getUpcomingBookings } from '../../services/bookingsService';
+import { getBookingsByHost, getTodayCheckIns, getUpcomingBookings } from '../../services/bookingsService';
 import { getUnreadMessageCount } from '../../services/messagesService';
 import { getNotifications, markAllNotificationsRead } from '../../services/notificationsService';
 import NotificationsPanel from '../../components/NotificationsPanel';
@@ -20,6 +20,7 @@ function HostDashboard() {
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
   const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const [recentBookings, setRecentBookings] = useState([]);
 
   useEffect(() => {
     if (currentUser) {
@@ -32,28 +33,40 @@ function HostDashboard() {
     try {
       setLoading(true);
       
-      // Load listings
-      const listings = await getListingsByHost(currentUser.uid, 'active');
-      
-      // Load bookings
-      const todayCheckIns = await getTodayCheckIns(currentUser.uid);
-      const upcomingBookings = await getUpcomingBookings(currentUser.uid);
-      
-      // Load unread messages
-      const unreadMessages = await getUnreadMessageCount(currentUser.uid);
+      const [
+        listings,
+        allBookings,
+        todayCheckIns,
+        upcomingBookings,
+        unreadMessages,
+      ] = await Promise.all([
+        getListingsByHost(currentUser.uid, 'active'),
+        getBookingsByHost(currentUser.uid),
+        getTodayCheckIns(currentUser.uid),
+        getUpcomingBookings(currentUser.uid),
+        getUnreadMessageCount(currentUser.uid),
+      ]);
       
       // Calculate revenue (this month)
       const thisMonth = new Date();
       thisMonth.setDate(1);
       thisMonth.setHours(0, 0, 0, 0);
       
-      const allBookings = [...todayCheckIns, ...upcomingBookings];
       const thisMonthRevenue = allBookings
         .filter(booking => {
           const bookingDate = new Date(booking.createdAt);
-          return bookingDate >= thisMonth && booking.status === 'confirmed';
+          const revenueStatus = ['confirmed', 'completed'].includes(booking.status);
+          const paidStatus = ['paid', 'partial'].includes(booking.paymentStatus);
+          return bookingDate >= thisMonth && revenueStatus && paidStatus;
         })
-        .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+        .reduce((sum, booking) => {
+          const hostEarnings = (booking.totalAmount || 0) - (booking.serviceFee || 0);
+          return sum + Math.max(hostEarnings, 0);
+        }, 0);
+
+      const latestBookings = [...allBookings]
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, 5);
 
       setStats({
         todayCheckIns: todayCheckIns.length,
@@ -62,20 +75,17 @@ function HostDashboard() {
         revenue: thisMonthRevenue,
         unreadMessages,
       });
+      setRecentBookings(latestBookings);
     } catch (err) {
       console.error('Error loading dashboard data:', err);
-      // If it's an index error, the index is still building - this is expected
-      if (err.message && err.message.includes('index')) {
-        console.log('Index is building, data will load once index is ready');
-        // Set empty stats instead of showing error
-        setStats({
-          todayCheckIns: 0,
-          upcomingBookings: 0,
-          activeListings: 0,
-          revenue: 0,
-          unreadMessages: 0,
-        });
-      }
+      setStats({
+        todayCheckIns: 0,
+        upcomingBookings: 0,
+        activeListings: 0,
+        revenue: 0,
+        unreadMessages: 0,
+      });
+      setRecentBookings([]);
     } finally {
       setLoading(false);
     }
@@ -111,6 +121,25 @@ function HostDashboard() {
       currency: 'USD',
       minimumFractionDigits: 0,
     }).format(price);
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const getPaymentLabel = (booking) => {
+    const method = booking.paymentMethod || booking.payment?.method || 'payment';
+    const label = method === 'paypal'
+      ? 'PayPal'
+      : method === 'e-wallet'
+      ? 'E-wallet'
+      : method.charAt(0).toUpperCase() + method.slice(1);
+    return `${label} - ${booking.paymentStatus || 'pending'}`;
   };
 
   return (
@@ -156,13 +185,55 @@ function HostDashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <Link to="/host/bookings" className="card hover:shadow-lg transition-shadow">
+        <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-display font-semibold">Recent Bookings</h2>
-            <span className="text-primary text-sm">View all →</span>
+            <Link to="/host/bookings" className="text-primary text-sm">View all &rarr;</Link>
           </div>
-          <p className="text-muted-foreground">View and manage your bookings</p>
-        </Link>
+          {loading ? (
+            <p className="text-muted-foreground">Loading bookings...</p>
+          ) : recentBookings.length === 0 ? (
+            <p className="text-muted-foreground">No bookings yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {recentBookings.map((booking) => (
+                <Link
+                  key={booking.id}
+                  to="/host/bookings"
+                  className="block rounded-md border border-border p-3 transition-colors hover:bg-muted/40"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">
+                        {booking.guestDetails?.name || 'Guest'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatDate(booking.checkIn)} - {formatDate(booking.checkOut)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {getPaymentLabel(booking)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-foreground">
+                        {formatPrice(Math.max((booking.totalAmount || 0) - (booking.serviceFee || 0), 0))}
+                      </p>
+                      <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${
+                        booking.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                        booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                        booking.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                        booking.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                        'bg-muted text-foreground'
+                      }`}>
+                        {booking.status}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
         <Link to="/host/messages" className="card hover:shadow-lg transition-shadow relative">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-display font-semibold">Messages</h2>
@@ -171,7 +242,7 @@ function HostDashboard() {
                 {stats.unreadMessages} new
               </span>
             )}
-            <span className="text-primary text-sm">View all →</span>
+            <span className="text-primary text-sm">View all &rarr;</span>
           </div>
           <p className="text-muted-foreground">
             {stats.unreadMessages > 0 

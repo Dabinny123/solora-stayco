@@ -8,6 +8,7 @@ import { createPayment, completePayment, getPaymentByPayPalOrderId, getPaymentBy
 import { getWalletBalance, payWithWallet } from '../../services/walletService';
 import { updateUserMoodPreferences } from '../../services/usersService';
 import { createNotification } from '../../services/notificationsService';
+import { createMessage } from '../../services/messagesService';
 import { createPayPalPayment, getPayPalConfig } from '../../services/paypalService';
 import { getDocuments } from '../../firebase/firestoreService';
 import { createTransactionLog, TRANSACTION_EVENTS } from '../../services/transactionLogService';
@@ -61,6 +62,29 @@ function Booking() {
       await Promise.all(notifications.map((notification) => createNotification(notification)));
     } catch (notificationError) {
       console.error('Error creating notification:', notificationError);
+    }
+  };
+
+  const formatBookingMessageDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const safeCreateBookingMessage = async (bookingId, pricing, paymentMethod) => {
+    try {
+      await createMessage({
+        senderId: currentUser.uid,
+        receiverId: listing.hostId,
+        bookingId,
+        listingId: listing.id,
+        type: 'booking',
+        content: `${formData.guestName} booked ${listing.title} from ${formatBookingMessageDate(formData.checkIn)} to ${formatBookingMessageDate(formData.checkOut)} for ${pricing.nights} night${pricing.nights === 1 ? '' : 's'} using ${paymentMethod}.`,
+      });
+    } catch (messageError) {
+      console.error('Error creating booking message:', messageError);
     }
   };
 
@@ -414,8 +438,8 @@ function Booking() {
         {
           userId: listing.hostId,
           type: 'booking',
-          title: 'New booking request',
-          message: `${formData.guestName} requested ${pricing.nights} nights at ${listing.title}`,
+          title: 'New confirmed booking',
+          message: `${formData.guestName} booked ${pricing.nights} nights at ${listing.title}`,
           metadata: { bookingId, listingId: listing.id },
         },
         {
@@ -426,6 +450,7 @@ function Booking() {
           metadata: { bookingId },
         },
       ]);
+      await safeCreateBookingMessage(bookingId, pricing, 'PayPal');
 
       if (selectedMoodId) {
         try {
@@ -849,18 +874,25 @@ function Booking() {
         {
           userId: listing.hostId,
           type: 'booking',
-          title: 'New booking request',
-          message: `${formData.guestName} requested ${pricing.nights} nights at ${listing.title}`,
+          title: formData.paymentMethod === 'e-wallet' ? 'New confirmed booking' : 'New booking request',
+          message: formData.paymentMethod === 'e-wallet'
+            ? `${formData.guestName} booked ${pricing.nights} nights at ${listing.title}`
+            : `${formData.guestName} requested ${pricing.nights} nights at ${listing.title}`,
           metadata: { bookingId, listingId: listing.id },
         },
         {
           userId: currentUser.uid,
           type: 'booking',
-          title: 'Booking submitted',
-          message: `We sent your request to ${listing.title}. We'll update you once the host responds.`,
+          title: formData.paymentMethod === 'e-wallet' ? 'Booking confirmed' : 'Booking submitted',
+          message: formData.paymentMethod === 'e-wallet'
+            ? `Your booking at ${listing.title} has been confirmed!`
+            : `We sent your request to ${listing.title}. We'll update you once the host responds.`,
           metadata: { bookingId },
         },
       ]);
+      if (formData.paymentMethod === 'e-wallet') {
+        await safeCreateBookingMessage(bookingId, pricing, 'E-wallet');
+      }
 
       // Navigate to booking confirmation
       navigate(`/booking/${bookingId}/confirmation`);

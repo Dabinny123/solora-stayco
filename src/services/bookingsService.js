@@ -95,11 +95,33 @@ export async function getBookingsByGuest(guestId, status = null) {
  * @returns {Promise<Array>} Array of bookings
  */
 export async function getBookingsByHost(hostId, status = null) {
-    const filters = [{ field: 'hostId', operator: '==', value: hostId }];
-    if (status) {
-        filters.push({ field: 'status', operator: '==', value: status });
+    try {
+        const filters = [{ field: 'hostId', operator: '==', value: hostId }];
+        if (status) {
+            filters.push({ field: 'status', operator: '==', value: status });
+        }
+        return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'desc');
+    } catch (error) {
+        if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+            console.warn('Host booking index unavailable, using host-only fallback query');
+            let filtered = await getDocuments(COLLECTION_NAME, [
+                { field: 'hostId', operator: '==', value: hostId }
+            ], null, null, 1000);
+
+            if (status) {
+                filtered = filtered.filter(booking => booking.status === status);
+            }
+
+            filtered.sort((a, b) => {
+                const dateA = new Date(a.createdAt || 0);
+                const dateB = new Date(b.createdAt || 0);
+                return dateB - dateA;
+            });
+
+            return filtered;
+        }
+        throw error;
     }
-    return await getDocuments(COLLECTION_NAME, filters, 'createdAt', 'desc');
 }
 
 /**
@@ -122,16 +144,28 @@ export async function getBookingsByListing(listingId, status = null) {
  * @returns {Promise<Array>} Array of bookings
  */
 export async function getUpcomingBookings(hostId) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const filters = [
-        { field: 'hostId', operator: '==', value: hostId },
-        { field: 'status', operator: '==', value: 'confirmed' },
-        { field: 'checkIn', operator: '>=', value: today.toISOString() }
-    ];
-    
-    return await getDocuments(COLLECTION_NAME, filters, 'checkIn', 'asc');
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const filters = [
+            { field: 'hostId', operator: '==', value: hostId },
+            { field: 'status', operator: '==', value: 'confirmed' },
+            { field: 'checkIn', operator: '>=', value: today.toISOString() }
+        ];
+        
+        return await getDocuments(COLLECTION_NAME, filters, 'checkIn', 'asc');
+    } catch (error) {
+        if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const bookings = await getBookingsByHost(hostId, 'confirmed');
+            return bookings
+                .filter(booking => new Date(booking.checkIn) >= today)
+                .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn));
+        }
+        throw error;
+    }
 }
 
 /**
@@ -140,19 +174,36 @@ export async function getUpcomingBookings(hostId) {
  * @returns {Promise<Array>} Array of bookings
  */
 export async function getTodayCheckIns(hostId) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    const filters = [
-        { field: 'hostId', operator: '==', value: hostId },
-        { field: 'status', operator: '==', value: 'confirmed' },
-        { field: 'checkIn', operator: '>=', value: today.toISOString() },
-        { field: 'checkIn', operator: '<', value: tomorrow.toISOString() }
-    ];
-    
-    return await getDocuments(COLLECTION_NAME, filters, 'checkIn', 'asc');
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const filters = [
+            { field: 'hostId', operator: '==', value: hostId },
+            { field: 'status', operator: '==', value: 'confirmed' },
+            { field: 'checkIn', operator: '>=', value: today.toISOString() },
+            { field: 'checkIn', operator: '<', value: tomorrow.toISOString() }
+        ];
+        
+        return await getDocuments(COLLECTION_NAME, filters, 'checkIn', 'asc');
+    } catch (error) {
+        if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const bookings = await getBookingsByHost(hostId, 'confirmed');
+            return bookings
+                .filter(booking => {
+                    const checkIn = new Date(booking.checkIn);
+                    return checkIn >= today && checkIn < tomorrow;
+                })
+                .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn));
+        }
+        throw error;
+    }
 }
 
 /**
