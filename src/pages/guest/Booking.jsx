@@ -4,12 +4,13 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getListing } from '../../services/listingsService';
 import { createBooking } from '../../services/bookingsService';
-import { createPayment, completePayment } from '../../services/paymentsService';
+import { createPayment, completePayment, getPaymentByPayPalOrderId, getPaymentByTransactionId } from '../../services/paymentsService';
 import { getWalletBalance, payWithWallet } from '../../services/walletService';
 import { updateUserMoodPreferences } from '../../services/usersService';
 import { createNotification } from '../../services/notificationsService';
 import { createPayPalPayment, getPayPalConfig } from '../../services/paypalService';
 import { getDocuments } from '../../firebase/firestoreService';
+import { createTransactionLog, TRANSACTION_EVENTS } from '../../services/transactionLogService';
 import VerificationModal from '../../components/VerificationModal';
 
 function Booking() {
@@ -46,6 +47,22 @@ function Booking() {
     routingNumber: '',
   });
   const [showVerifyModal, setShowVerifyModal] = useState(false);
+
+  const safeCreateTransactionLog = async (logData) => {
+    try {
+      await createTransactionLog(logData);
+    } catch (logError) {
+      console.error('Error writing transaction log:', logError);
+    }
+  };
+
+  const safeCreateNotifications = async (notifications) => {
+    try {
+      await Promise.all(notifications.map((notification) => createNotification(notification)));
+    } catch (notificationError) {
+      console.error('Error creating notification:', notificationError);
+    }
+  };
 
   useEffect(() => {
     if (!currentUser) {
@@ -194,6 +211,15 @@ function Booking() {
 
       // Create booking first
       const pricing = await calculatePricing();
+      const existingPayment =
+        (await getPaymentByTransactionId(paymentResult.transactionId)) ||
+        (await getPaymentByPayPalOrderId(paymentResult.orderId));
+
+      if (existingPayment?.bookingId) {
+        navigate(`/booking/${existingPayment.bookingId}/confirmation`);
+        return;
+      }
+
       const bookingData = {
         listingId: id,
         guestId: currentUser.uid,
@@ -221,6 +247,17 @@ function Booking() {
       };
 
       const bookingId = await createBooking(bookingData);
+      await safeCreateTransactionLog({
+        type: TRANSACTION_EVENTS.BOOKING_CREATED,
+        userId: currentUser.uid,
+        actorId: currentUser.uid,
+        bookingId,
+        amount: pricing.total,
+        currency: listing.currency || 'USD',
+        paymentMethod: 'paypal',
+        status: 'pending',
+        description: `Booking created after PayPal capture for ${listing.title}`,
+      });
 
       // Calculate payment amount and remaining balance
       const paymentAmount = parseFloat(paymentResult.amount);
@@ -263,6 +300,23 @@ function Booking() {
 
       const paymentId = await createPayment(paymentData);
       await completePayment(paymentId, paymentResult.transactionId);
+      await safeCreateTransactionLog({
+        type: TRANSACTION_EVENTS.PAYMENT_COMPLETED,
+        userId: currentUser.uid,
+        actorId: currentUser.uid,
+        bookingId,
+        paymentId,
+        externalTransactionId: paymentResult.transactionId,
+        amount: paymentAmount,
+        currency: listing.currency || 'USD',
+        paymentMethod: 'paypal',
+        status: isFullPayment ? 'paid' : 'partial',
+        description: `PayPal payment completed for booking ${bookingId}`,
+        metadata: {
+          paypalOrderId: paymentResult.orderId,
+          remainingBalance,
+        },
+      });
 
       // Update booking with payment ID and status
       // IMPORTANT: Set status to 'confirmed' after successful payment
@@ -271,6 +325,10 @@ function Booking() {
         paymentId: paymentId,
         paidAt: new Date().toISOString(),
         paymentStatus: isFullPayment ? 'paid' : 'partial',
+        paymentMethod: 'paypal',
+        paymentTransactionId: paymentResult.transactionId,
+        paypalOrderId: paymentResult.orderId,
+        paymentCompletedAt: new Date().toISOString(),
         remainingBalance: remainingBalance,
         status: 'confirmed', // Confirm booking after successful payment
         confirmedAt: new Date().toISOString(),
@@ -294,60 +352,109 @@ function Booking() {
             bookingId,
             paymentId
           );
+          await safeCreateTransactionLog({
+            type: TRANSACTION_EVENTS.WALLET_CREDITED,
+            userId: listing.hostId,
+            actorId: currentUser.uid,
+            bookingId,
+            paymentId,
+            amount: proportionalHostEarnings,
+            currency: listing.currency || 'USD',
+            paymentMethod: 'wallet',
+            status: 'completed',
+            description: `Host wallet credited from booking ${bookingId}`,
+          });
           
           console.log(`✅ Host wallet credited: $${proportionalHostEarnings} added to host ${listing.hostId}`);
           
           // Notify host of wallet credit
-          await createNotification({
+          await safeCreateNotifications([{
             userId: listing.hostId,
             type: 'payment',
             title: 'Earnings added to wallet',
             message: `$${proportionalHostEarnings.toFixed(2)} has been added to your wallet from booking ${bookingId}`,
             metadata: { bookingId, paymentId, amount: proportionalHostEarnings },
-          });
+          }]);
         } catch (error) {
           console.error('❌ Error crediting host wallet:', error);
           // Don't fail the booking if wallet credit fails - admin can fix manually
           // Log error for admin review
-          const { createDocument } = await import('../../firebase/firestoreService');
-          await createDocument('wallet_errors', {
-            paymentId,
-            hostId: listing.hostId,
-            amount: proportionalHostEarnings,
+          try {
+            const { createDocument } = await import('../../firebase/firestoreService');
+            await createDocument('wallet_errors', {
+              paymentId,
+              hostId: listing.hostId,
+              amount: proportionalHostEarnings,
+              bookingId,
+              status: 'failed',
+              error: error.message,
+              createdAt: new Date().toISOString(),
+            });
+          } catch (walletErrorLogError) {
+            console.error('Error writing wallet error log:', walletErrorLogError);
+          }
+          await safeCreateTransactionLog({
+            type: TRANSACTION_EVENTS.WALLET_CREDITED,
+            userId: listing.hostId,
+            actorId: currentUser.uid,
             bookingId,
+            paymentId,
+            amount: proportionalHostEarnings,
+            currency: listing.currency || 'USD',
+            paymentMethod: 'wallet',
             status: 'failed',
-            error: error.message,
-            createdAt: new Date().toISOString(),
+            description: `Host wallet credit failed for booking ${bookingId}`,
+            metadata: { error: error.message },
           });
         }
       }
 
       // Create notifications
-      await Promise.all([
-        createNotification({
+      await safeCreateNotifications([
+        {
           userId: listing.hostId,
           type: 'booking',
           title: 'New booking request',
           message: `${formData.guestName} requested ${pricing.nights} nights at ${listing.title}`,
           metadata: { bookingId, listingId: listing.id },
-        }),
-        createNotification({
+        },
+        {
           userId: currentUser.uid,
           type: 'booking',
           title: 'Booking confirmed',
           message: `Your booking at ${listing.title} has been confirmed!`,
           metadata: { bookingId },
-        }),
+        },
       ]);
 
       if (selectedMoodId) {
-        await updateUserMoodPreferences(currentUser.uid, selectedMoodId);
+        try {
+          await updateUserMoodPreferences(currentUser.uid, selectedMoodId);
+        } catch (preferenceError) {
+          console.error('Error updating mood preferences:', preferenceError);
+        }
       }
 
       // Navigate to confirmation
       navigate(`/booking/${bookingId}/confirmation`);
     } catch (error) {
       console.error('Error processing PayPal payment:', error);
+      try {
+        await safeCreateTransactionLog({
+          type: TRANSACTION_EVENTS.PAYMENT_FAILED,
+          userId: currentUser?.uid || null,
+          actorId: currentUser?.uid || null,
+          externalTransactionId: paymentResult?.transactionId || null,
+          amount: paymentResult?.amount ? parseFloat(paymentResult.amount) : 0,
+          currency: paymentResult?.currency || listing?.currency || 'USD',
+          paymentMethod: 'paypal',
+          status: 'failed',
+          description: 'PayPal payment captured but booking workflow failed',
+          metadata: { error: error.message, paypalOrderId: paymentResult?.orderId },
+        });
+      } catch (logError) {
+        console.error('Error writing PayPal failure log:', logError);
+      }
       setError('Payment successful but booking creation failed. Please contact support.');
       setSubmitting(false);
     }
@@ -601,6 +708,17 @@ function Booking() {
       };
 
       const bookingId = await createBooking(bookingData);
+      await safeCreateTransactionLog({
+        type: TRANSACTION_EVENTS.BOOKING_CREATED,
+        userId: currentUser.uid,
+        actorId: currentUser.uid,
+        bookingId,
+        amount: fullPricing.total,
+        currency: listing.currency || 'USD',
+        paymentMethod: formData.paymentMethod,
+        status: 'pending',
+        description: `Booking created for ${listing.title}`,
+      });
 
       // Create payment record with commission split
       const paymentData = {
@@ -633,6 +751,19 @@ function Booking() {
         if (walletResult.success) {
           // Complete payment
           await completePayment(paymentId, `wallet-${bookingId}`);
+          await safeCreateTransactionLog({
+            type: TRANSACTION_EVENTS.PAYMENT_COMPLETED,
+            userId: currentUser.uid,
+            actorId: currentUser.uid,
+            bookingId,
+            paymentId,
+            externalTransactionId: `wallet-${bookingId}`,
+            amount: fullPricing.total,
+            currency: listing.currency || 'USD',
+            paymentMethod: 'e-wallet',
+            status: 'paid',
+            description: `Wallet payment completed for booking ${bookingId}`,
+          });
           
           // Update booking payment status
           const { updateBooking } = await import('../../services/bookingsService');
@@ -640,6 +771,9 @@ function Booking() {
             paymentStatus: 'paid',
             paymentId: paymentId,
             paidAt: new Date().toISOString(),
+            paymentMethod: 'e-wallet',
+            paymentTransactionId: `wallet-${bookingId}`,
+            paymentCompletedAt: new Date().toISOString(),
             status: 'confirmed',
             confirmedAt: new Date().toISOString(),
           });
@@ -654,15 +788,27 @@ function Booking() {
                 bookingId,
                 paymentId
               );
+              await safeCreateTransactionLog({
+                type: TRANSACTION_EVENTS.WALLET_CREDITED,
+                userId: listing.hostId,
+                actorId: currentUser.uid,
+                bookingId,
+                paymentId,
+                amount: fullPricing.hostEarnings,
+                currency: listing.currency || 'USD',
+                paymentMethod: 'wallet',
+                status: 'completed',
+                description: `Host wallet credited from booking ${bookingId}`,
+              });
               
               // Notify host
-              await createNotification({
+              await safeCreateNotifications([{
                 userId: listing.hostId,
                 type: 'payment',
                 title: 'Earnings added to wallet',
                 message: `$${fullPricing.hostEarnings.toFixed(2)} has been added to your wallet from booking ${bookingId}`,
                 metadata: { bookingId, paymentId, amount: fullPricing.hostEarnings },
-              });
+              }]);
             } catch (error) {
               console.error('Error crediting host wallet:', error);
               // Don't fail the booking if wallet credit fails
@@ -699,28 +845,32 @@ function Booking() {
       }
 
       // Create notifications
-      await Promise.all([
-        createNotification({
+      await safeCreateNotifications([
+        {
           userId: listing.hostId,
           type: 'booking',
           title: 'New booking request',
           message: `${formData.guestName} requested ${pricing.nights} nights at ${listing.title}`,
           metadata: { bookingId, listingId: listing.id },
-        }),
-        createNotification({
+        },
+        {
           userId: currentUser.uid,
           type: 'booking',
           title: 'Booking submitted',
           message: `We sent your request to ${listing.title}. We'll update you once the host responds.`,
           metadata: { bookingId },
-        }),
+        },
       ]);
 
       // Navigate to booking confirmation
       navigate(`/booking/${bookingId}/confirmation`);
 
       if (selectedMoodId) {
-        await updateUserMoodPreferences(currentUser.uid, selectedMoodId);
+        try {
+          await updateUserMoodPreferences(currentUser.uid, selectedMoodId);
+        } catch (preferenceError) {
+          console.error('Error updating mood preferences:', preferenceError);
+        }
       }
     } catch (err) {
       console.error('Error creating booking:', err);

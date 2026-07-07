@@ -16,7 +16,7 @@ const COLLECTION_NAME = 'payments';
 export async function createPayment(paymentData) {
     const data = {
         ...paymentData,
-        status: 'pending',
+        status: paymentData.status || 'pending',
         refundAmount: 0,
         createdAt: new Date().toISOString(),
     };
@@ -68,6 +68,40 @@ export async function getPaymentByBooking(bookingId) {
         [{ field: 'bookingId', operator: '==', value: bookingId }],
         'createdAt',
         'desc',
+        1
+    );
+    return payments.length > 0 ? payments[0] : null;
+}
+
+/**
+ * Get payment by external transaction ID.
+ * @param {string} transactionId - PayPal capture ID, wallet ID, or other external transaction ID
+ * @returns {Promise<Object|null>} Payment data
+ */
+export async function getPaymentByTransactionId(transactionId) {
+    if (!transactionId) return null;
+    const payments = await getDocuments(
+        COLLECTION_NAME,
+        [{ field: 'transactionId', operator: '==', value: transactionId }],
+        null,
+        null,
+        1
+    );
+    return payments.length > 0 ? payments[0] : null;
+}
+
+/**
+ * Get payment by PayPal order ID.
+ * @param {string} paypalOrderId - PayPal order ID
+ * @returns {Promise<Object|null>} Payment data
+ */
+export async function getPaymentByPayPalOrderId(paypalOrderId) {
+    if (!paypalOrderId) return null;
+    const payments = await getDocuments(
+        COLLECTION_NAME,
+        [{ field: 'paypalOrderId', operator: '==', value: paypalOrderId }],
+        null,
+        null,
         1
     );
     return payments.length > 0 ? payments[0] : null;

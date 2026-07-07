@@ -10,6 +10,7 @@ import {
 import { getUser, updateUser } from './usersService';
 import { deductFunds } from './walletService';
 import { createPayPalPayout } from './paypalPayoutsService';
+import { createTransactionLog, TRANSACTION_EVENTS } from './transactionLogService';
 
 const COLLECTION_NAME = 'withdrawal_requests';
 
@@ -48,6 +49,17 @@ export async function createWithdrawalRequest(hostId, amount, currency = 'USD') 
             status: 'pending', // 'pending', 'approved', 'processing', 'completed', 'rejected', 'failed'
             requestedAt: new Date().toISOString(),
             walletBalanceBefore: currentBalance,
+        });
+        await createTransactionLog({
+            type: TRANSACTION_EVENTS.WITHDRAWAL_REQUESTED,
+            userId: hostId,
+            actorId: hostId,
+            withdrawalId: requestId,
+            amount,
+            currency,
+            paymentMethod: 'paypal',
+            status: 'pending',
+            description: `Withdrawal requested for ${amount} ${currency}`,
         });
         
         console.log(`✅ Withdrawal request created: ${requestId} for host ${hostId} ($${amount})`);
@@ -133,6 +145,17 @@ export async function approveWithdrawalRequest(requestId, adminId) {
             approvedAt: new Date().toISOString(),
             approvedBy: adminId,
         });
+        await createTransactionLog({
+            type: TRANSACTION_EVENTS.WITHDRAWAL_APPROVED,
+            userId: request.hostId,
+            actorId: adminId,
+            withdrawalId: requestId,
+            amount: request.amount,
+            currency: request.currency || 'USD',
+            paymentMethod: 'paypal',
+            status: 'processing',
+            description: `Withdrawal request ${requestId} approved by admin`,
+        });
         
         // Process PayPal payout
         try {
@@ -151,6 +174,19 @@ export async function approveWithdrawalRequest(requestId, adminId) {
                 payout_batch_id: payoutResult.payout_batch_id,
                 batch_status: payoutResult.batch_status,
                 completedAt: new Date().toISOString(),
+            });
+            await createTransactionLog({
+                type: TRANSACTION_EVENTS.WITHDRAWAL_COMPLETED,
+                userId: request.hostId,
+                actorId: adminId,
+                withdrawalId: requestId,
+                externalTransactionId: payoutResult.payout_batch_id,
+                amount: request.amount,
+                currency: request.currency || 'USD',
+                paymentMethod: 'paypal',
+                status: 'completed',
+                description: `Withdrawal request ${requestId} completed`,
+                metadata: { batchStatus: payoutResult.batch_status },
             });
             
             console.log(`✅ Withdrawal approved and processed: ${requestId} -> ${payoutResult.payout_batch_id}`);
@@ -207,6 +243,18 @@ export async function rejectWithdrawalRequest(requestId, adminId, reason) {
             rejectedAt: new Date().toISOString(),
             rejectedBy: adminId,
             rejectionReason: reason,
+        });
+        await createTransactionLog({
+            type: TRANSACTION_EVENTS.WITHDRAWAL_REJECTED,
+            userId: request.hostId,
+            actorId: adminId,
+            withdrawalId: requestId,
+            amount: request.amount,
+            currency: request.currency || 'USD',
+            paymentMethod: 'paypal',
+            status: 'rejected',
+            description: `Withdrawal request ${requestId} rejected`,
+            metadata: { reason },
         });
         
         console.log(`✅ Withdrawal request rejected: ${requestId}`);

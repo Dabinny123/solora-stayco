@@ -16,8 +16,8 @@ const COLLECTION_NAME = 'bookings';
 export async function createBooking(bookingData) {
     const data = {
         ...bookingData,
-        status: 'pending',
-        paymentStatus: 'pending',
+        status: bookingData.status || 'pending',
+        paymentStatus: bookingData.paymentStatus || 'pending',
         createdAt: new Date().toISOString(),
     };
     
@@ -61,9 +61,11 @@ export async function getBookingsByGuest(guestId, status = null) {
         if (error.code === 'failed-precondition' || error.message?.includes('index') || error.message?.includes('building')) {
             console.warn('Index building, using fallback query with client-side filtering');
             try {
-                // Get all bookings and filter client-side (less efficient but works while index builds)
-                const allBookings = await getDocuments(COLLECTION_NAME, [], 'createdAt', 'desc', 1000);
-                let filtered = allBookings.filter(booking => booking.guestId === guestId);
+                // Query only the current guest without orderBy to avoid composite index requirements
+                // and to stay compatible with Firestore security rules.
+                let filtered = await getDocuments(COLLECTION_NAME, [
+                    { field: 'guestId', operator: '==', value: guestId }
+                ], null, null, 1000);
                 
                 if (status) {
                     filtered = filtered.filter(booking => booking.status === status);

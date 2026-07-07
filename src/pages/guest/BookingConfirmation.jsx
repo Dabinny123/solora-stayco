@@ -3,12 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getBooking } from '../../services/bookingsService';
 import { getListing } from '../../services/listingsService';
+import { getPaymentByBooking } from '../../services/paymentsService';
 
 function BookingConfirmation() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [booking, setBooking] = useState(null);
   const [listing, setListing] = useState(null);
+  const [payment, setPayment] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,8 +26,19 @@ function BookingConfirmation() {
       }
       setBooking(bookingData);
 
-      const listingData = await getListing(bookingData.listingId);
-      setListing(listingData);
+      try {
+        const listingData = await getListing(bookingData.listingId);
+        setListing(listingData);
+      } catch (listingError) {
+        console.error('Error loading listing:', listingError);
+      }
+
+      try {
+        const paymentData = await getPaymentByBooking(bookingData.id);
+        setPayment(paymentData);
+      } catch (paymentError) {
+        console.error('Error loading payment:', paymentError);
+      }
     } catch (err) {
       console.error('Error loading booking:', err);
       navigate('/guest/dashboard');
@@ -50,6 +63,31 @@ function BookingConfirmation() {
     });
   };
 
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const getPaymentMethodLabel = () => {
+    const method = booking?.paymentMethod || payment?.method;
+    const labels = {
+      paypal: 'PayPal',
+      'e-wallet': 'E-Wallet',
+      bank: 'Bank Transfer',
+      card: 'Card',
+    };
+    return labels[method] || (method ? method : 'N/A');
+  };
+
+  const paymentDate = booking?.paidAt || booking?.paymentCompletedAt || payment?.completedAt || payment?.processedAt;
+  const transactionId = booking?.paymentTransactionId || payment?.transactionId || payment?.paypalOrderId;
+
   if (loading) {
     return (
       <div className="container-custom py-12">
@@ -61,12 +99,12 @@ function BookingConfirmation() {
     );
   }
 
-  if (!booking || !listing) {
+  if (!booking) {
     return null;
   }
 
   // Check if payment was via PayPal
-  const isPayPalPayment = booking.paymentMethod === 'paypal';
+  const isPayPalPayment = (booking.paymentMethod || payment?.method) === 'paypal';
 
   return (
     <div className="min-h-screen bg-background py-12">
@@ -125,10 +163,12 @@ function BookingConfirmation() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Property</p>
-              <p className="font-semibold">{listing.title}</p>
-              <p className="text-sm text-muted-foreground">
-                {listing.location?.address}, {listing.location?.city}
-              </p>
+              <p className="font-semibold">{listing?.title || 'Listing'}</p>
+              {listing?.location && (
+                <p className="text-sm text-muted-foreground">
+                  {listing.location?.address}, {listing.location?.city}
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -160,10 +200,28 @@ function BookingConfirmation() {
                 {booking.paymentStatus === 'paid' ? '✓ Paid' : booking.paymentStatus === 'partial' ? 'Partial Payment' : booking.paymentStatus?.charAt(0).toUpperCase() + booking.paymentStatus?.slice(1)}
               </span>
             </div>
-            {booking.paymentMethod && (
+            {(booking.paymentMethod || payment?.method) && (
               <div>
                 <p className="text-sm text-muted-foreground">Payment Method</p>
-                <p className="font-semibold capitalize">{booking.paymentMethod === 'paypal' ? 'PayPal' : booking.paymentMethod}</p>
+                <p className="font-semibold">{getPaymentMethodLabel()}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-sm text-muted-foreground">Payment Date & Time</p>
+              <p className="font-semibold">{formatDateTime(paymentDate)}</p>
+            </div>
+            {transactionId && (
+              <div>
+                <p className="text-sm text-muted-foreground">Transaction ID</p>
+                <p className="font-mono text-xs break-all text-foreground">{transactionId}</p>
+              </div>
+            )}
+            {(booking.paypalOrderId || payment?.paypalOrderId) && (
+              <div>
+                <p className="text-sm text-muted-foreground">PayPal Order ID</p>
+                <p className="font-mono text-xs break-all text-foreground">
+                  {booking.paypalOrderId || payment?.paypalOrderId}
+                </p>
               </div>
             )}
             <div>

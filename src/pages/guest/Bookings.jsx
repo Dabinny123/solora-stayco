@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { getBookingsByGuest, cancelBooking } from '../../services/bookingsService';
 import { getListing } from '../../services/listingsService';
 import { createNotification } from '../../services/notificationsService';
+import { getPaymentByBooking } from '../../services/paymentsService';
 
 function GuestBookings() {
   const { currentUser } = useAuth();
@@ -31,16 +32,24 @@ function GuestBookings() {
         filtered = allBookings.filter(booking => booking.status === filter);
       }
       
-      // Load listing data for each booking
+      // Load listing and payment data for each booking
       const bookingsWithListings = await Promise.all(
         filtered.map(async (booking) => {
+          let listing = null;
+          let payment = null;
           try {
-            const listing = await getListing(booking.listingId);
-            return { ...booking, listing };
+            listing = await getListing(booking.listingId);
           } catch (err) {
             console.error(`Error loading listing ${booking.listingId}:`, err);
-            return { ...booking, listing: null };
           }
+
+          try {
+            payment = await getPaymentByBooking(booking.id);
+          } catch (err) {
+            console.error(`Error loading payment for booking ${booking.id}:`, err);
+          }
+
+          return { ...booking, listing, payment };
         })
       );
       
@@ -146,6 +155,7 @@ function GuestBookings() {
   };
 
   const formatDateTime = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -154,6 +164,32 @@ function GuestBookings() {
       minute: '2-digit',
     });
   };
+
+  const getPaymentMethodLabel = (booking) => {
+    const method = booking.paymentMethod || booking.payment?.method;
+    const labels = {
+      paypal: 'PayPal',
+      'e-wallet': 'E-Wallet',
+      bank: 'Bank Transfer',
+      card: 'Card',
+    };
+    return labels[method] || (method ? method : 'N/A');
+  };
+
+  const getPaymentDate = (booking) => (
+    booking.paidAt ||
+    booking.paymentCompletedAt ||
+    booking.payment?.completedAt ||
+    booking.payment?.processedAt ||
+    null
+  );
+
+  const getPaymentTransactionId = (booking) => (
+    booking.paymentTransactionId ||
+    booking.payment?.transactionId ||
+    booking.payment?.paypalOrderId ||
+    null
+  );
 
   const getListingImages = (listing) => {
     if (!listing) return [];
@@ -314,7 +350,7 @@ function GuestBookings() {
                   )}
 
                   <div className="mt-4 pt-4 border-t border-border">
-                    <div className="flex items-center justify-between">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Total Amount</p>
                         <p className="text-xl font-bold text-foreground">
@@ -326,11 +362,25 @@ function GuestBookings() {
                           </p>
                         )}
                       </div>
-                      <div className="text-right">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Payment</p>
+                        <p className="text-sm font-medium">
+                          {getPaymentMethodLabel(booking)}
+                        </p>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {booking.paymentStatus || booking.payment?.status || 'pending'}
+                        </p>
+                      </div>
+                      <div className="md:text-right">
                         <p className="text-sm text-muted-foreground">Booking Date</p>
                         <p className="text-sm font-medium">
                           {booking.createdAt ? formatDate(booking.createdAt) : 'N/A'}
                         </p>
+                        {getPaymentDate(booking) && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Paid: {formatDateTime(getPaymentDate(booking))}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -542,13 +592,36 @@ function GuestBookings() {
                     </div>
                   )}
                   <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-sm text-muted-foreground">Payment Status</p>
-                    <p className="font-medium capitalize">{selectedBooking.paymentStatus || 'pending'}</p>
-                    {selectedBooking.paidAt && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Paid on: {formatDateTime(selectedBooking.paidAt)}
-                      </p>
-                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Payment Status</p>
+                        <p className="font-medium capitalize">
+                          {selectedBooking.paymentStatus || selectedBooking.payment?.status || 'pending'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Payment Method</p>
+                        <p className="font-medium">{getPaymentMethodLabel(selectedBooking)}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Payment Date & Time</p>
+                        <p className="font-medium">{formatDateTime(getPaymentDate(selectedBooking))}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Transaction ID</p>
+                        <p className="font-mono text-xs break-all text-foreground">
+                          {getPaymentTransactionId(selectedBooking) || 'N/A'}
+                        </p>
+                      </div>
+                      {(selectedBooking.paypalOrderId || selectedBooking.payment?.paypalOrderId) && (
+                        <div className="md:col-span-2">
+                          <p className="text-sm text-muted-foreground">PayPal Order ID</p>
+                          <p className="font-mono text-xs break-all text-foreground">
+                            {selectedBooking.paypalOrderId || selectedBooking.payment?.paypalOrderId}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

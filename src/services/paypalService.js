@@ -26,11 +26,19 @@ const PAYPAL_CONFIG = {
  * Load PayPal SDK script
  * @returns {Promise<void>}
  */
-export function loadPayPalSDK() {
+export function loadPayPalSDK(currency = PAYPAL_CONFIG.currency) {
   return new Promise((resolve, reject) => {
-    if (window.paypal) {
+    const requestedCurrency = currency || PAYPAL_CONFIG.currency;
+    const existingScript = document.querySelector('script[data-solora-paypal-sdk="true"]');
+
+    if (window.paypal && existingScript?.dataset.currency === requestedCurrency) {
       resolve();
       return;
+    }
+
+    if (existingScript && existingScript.dataset.currency !== requestedCurrency) {
+      existingScript.remove();
+      delete window.paypal;
     }
 
     const script = document.createElement('script');
@@ -49,8 +57,10 @@ export function loadPayPalSDK() {
     const intent = 'capture'; // Required for payments
     // Enable payment methods including PayPal balance
     const components = 'buttons,marks,funding-eligibility';
-    script.src = `https://www${env ? '.sandbox' : ''}.paypal.com/sdk/js?client-id=${clientId}&currency=${PAYPAL_CONFIG.currency}&intent=${intent}&components=${components}`;
+    script.src = `https://www${env ? '.sandbox' : ''}.paypal.com/sdk/js?client-id=${clientId}&currency=${requestedCurrency}&intent=${intent}&components=${components}`;
     script.async = true;
+    script.dataset.soloraPaypalSdk = 'true';
+    script.dataset.currency = requestedCurrency;
     
     script.onload = () => {
       console.log('PayPal SDK loaded successfully');
@@ -89,7 +99,7 @@ export function loadPayPalSDK() {
  */
 export async function createPayPalPayment(paymentData, onApprove, onError) {
   try {
-    await loadPayPalSDK();
+    await loadPayPalSDK(paymentData.currency || PAYPAL_CONFIG.currency);
     
     if (!window.paypal) {
       throw new Error('PayPal SDK not loaded');
