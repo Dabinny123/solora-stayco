@@ -38,7 +38,7 @@ function SignUp() {
     setLoading(true);
     try {
       await signUp(formData.email, formData.password, formData.displayName, formData.role);
-      setSuccess('Account created! A verification link has been emailed to you. Please verify your email before signing in.');
+      setSuccess('Account created successfully! You can now sign in. You will be asked to verify your email when you make your first booking.');
       setFormData({ email: '', password: '', confirmPassword: '', displayName: '', role: 'guest' });
       await signOutUser();
     } catch (error) {

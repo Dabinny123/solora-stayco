@@ -8,12 +8,15 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null &&
+        request.auth.uid == userId &&
+        request.resource.data.role in ['guest', 'host'];
       // Allow users to update their own document
       // OR allow authenticated users to credit wallet balances (for booking earnings)
       // OR allow admin to update any user
       allow update: if request.auth != null && (
-        request.auth.uid == userId ||
+        (request.auth.uid == userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])) ||
         getUserRole() == 'admin' ||
         // Allow wallet balance credits (when balance increases)
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walletBalance', 'updatedAt']) &&
@@ -170,6 +173,11 @@ service cloud.firestore {
       allow update: if request.auth != null && getUserRole() == 'admin';
     }
     
+    // Verification codes collection (email verification via 6-digit code)
+    // Document owner is allowed to read/write their own verification code status.
+    match /verification_codes/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
   }
 }
-

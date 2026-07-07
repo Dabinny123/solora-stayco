@@ -10,12 +10,13 @@ import { updateUserMoodPreferences } from '../../services/usersService';
 import { createNotification } from '../../services/notificationsService';
 import { createPayPalPayment, getPayPalConfig } from '../../services/paypalService';
 import { getDocuments } from '../../firebase/firestoreService';
+import VerificationModal from '../../components/VerificationModal';
 
 function Booking() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentUser, userData } = useAuth();
+  const { currentUser, userData, isEmailVerified } = useAuth();
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -44,6 +45,7 @@ function Booking() {
     bankName: '',
     routingNumber: '',
   });
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
 
   useEffect(() => {
     if (!currentUser) {
@@ -512,6 +514,12 @@ function Booking() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+
+    // Verification gate — block unverified users
+    if (!isEmailVerified) {
+      setShowVerifyModal(true);
+      return;
+    }
 
     // Validation
     if (!formData.checkIn || !formData.checkOut) {
@@ -1271,9 +1279,18 @@ function Booking() {
           </div>
         </div>
       </div>
+
+      {/* Email Verification Modal — fallback gate */}
+      <VerificationModal
+        isOpen={showVerifyModal || (!isEmailVerified && !loading && !!currentUser)}
+        onClose={() => {
+          setShowVerifyModal(false);
+          navigate(-1);
+        }}
+        onVerified={() => setShowVerifyModal(false)}
+      />
     </div>
   );
 }
 
 export default Booking;
-

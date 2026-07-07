@@ -26,7 +26,7 @@ import { doc, setDoc, getDoc } from 'firebase/firestore';
 function getVerificationActionCodeSettings() {
     const fallbackUrl = typeof window !== 'undefined'
         ? `${window.location.origin}/verify-email`
-        : 'https://solora-stayco.web.app/verify-email';
+        : 'https://solora-stayco.vercel.app/verify-email';
 
     const configuredUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_EMAIL_VERIFICATION_REDIRECT)
         ? import.meta.env.VITE_EMAIL_VERIFICATION_REDIRECT
@@ -34,8 +34,16 @@ function getVerificationActionCodeSettings() {
 
     return {
         url: configuredUrl || fallbackUrl,
-        handleCodeInApp: false,
+        handleCodeInApp: true,
     };
+}
+
+export async function sendVerificationEmail(user = auth.currentUser) {
+    if (!user) {
+        throw new Error('No signed-in user found. Please sign in again to resend verification.');
+    }
+
+    await sendEmailVerification(user, getVerificationActionCodeSettings());
 }
 
 export async function signUp(email, password, displayName, role = 'guest') {
@@ -49,16 +57,8 @@ export async function signUp(email, password, displayName, role = 'guest') {
             displayName: displayName
         });
 
-        // Send email verification
-        try {
-            await sendEmailVerification(user, getVerificationActionCodeSettings());
-        } catch (verificationError) {
-            console.error('Error sending verification email:', verificationError);
-            throw new Error(
-                verificationError?.message ||
-                'Account created, but we could not send the verification email. Please try again.'
-            );
-        }
+        // Note: Email verification is handled separately via the code-based system.
+        // Users can verify from Account Settings or when they attempt to book.
 
         // Create user document in Firestore
         const userData = {
@@ -105,16 +105,7 @@ export async function signUp(email, password, displayName, role = 'guest') {
 export async function signIn(email, password) {
     try {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        if (!userCredential.user.emailVerified) {
-            try {
-                await sendEmailVerification(userCredential.user, getVerificationActionCodeSettings());
-            } catch (verificationError) {
-                console.error('Error re-sending verification email:', verificationError);
-            }
-            await signOut(auth);
-            const verificationMessage = 'Please verify your email before signing in. We just sent you a fresh verification link.';
-            throw new Error(verificationMessage);
-        }
+        // Unverified users can now sign in — they'll be prompted to verify when booking.
         console.log('User signed in successfully:', userCredential.user.uid);
         return userCredential;
     } catch (error) {

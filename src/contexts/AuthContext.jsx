@@ -59,6 +59,7 @@ export function AuthProvider({ children }) {
     isGuest: userData?.role === 'guest',
     isHost: userData?.role === 'host',
     isAdmin: userData?.role === 'admin',
+    isEmailVerified: userData?.emailVerified === true || currentUser?.emailVerified === true,
     refreshUserData, // Expose refresh function
   };
 

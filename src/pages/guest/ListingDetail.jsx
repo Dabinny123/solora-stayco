@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { addToSavedListings, removeFromSavedListings, getSavedListings } from '../../services/usersService';
 import { getMoodsByIds } from '../../services/moodsService';
 import { getUser } from '../../services/usersService';
+import VerificationModal from '../../components/VerificationModal';
 
 // Amenity icon mapping
 const AMENITY_ICONS = {
@@ -26,7 +27,7 @@ const AMENITY_ICONS = {
 function ListingDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, isEmailVerified } = useAuth();
   const [listing, setListing] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [host, setHost] = useState(null);
@@ -38,6 +39,7 @@ function ListingDetail() {
   const [guests, setGuests] = useState(2);
   const [moodNames, setMoodNames] = useState([]);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
 
   useEffect(() => {
     loadListing();
@@ -124,6 +126,22 @@ function ListingDetail() {
       navigate('/signin');
       return;
     }
+    // Block unverified users — show verification modal
+    if (!isEmailVerified) {
+      setShowVerifyModal(true);
+      return;
+    }
+    const params = new URLSearchParams({
+      checkIn: checkIn || '',
+      checkOut: checkOut || '',
+      guests: guests.toString(),
+    });
+    navigate(`/booking/${id}?${params.toString()}`);
+  };
+
+  const handleVerified = () => {
+    setShowVerifyModal(false);
+    // Proceed to booking after verification
     const params = new URLSearchParams({
       checkIn: checkIn || '',
       checkOut: checkOut || '',
@@ -594,6 +612,13 @@ function ListingDetail() {
           </div>
         </div>
       </div>
+
+      {/* Email Verification Modal */}
+      <VerificationModal
+        isOpen={showVerifyModal}
+        onClose={() => setShowVerifyModal(false)}
+        onVerified={handleVerified}
+      />
     </div>
   );
 }
